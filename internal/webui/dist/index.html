@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/logo.png" />
+<title>S7 模拟器 · DB 浏览器</title>
+<script>
+  // 在样式生效前恢复主题，避免页面闪烁；默认暗色。
+  try {
+    var t = localStorage.getItem("plc-simulater-theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+  <script type="module" crossorigin src="/assets/index-DaWcmgKc.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-VtBETbGD.css">
+</head>
+<body>
+<header>
+  <img class="logo" src="/logo.png" alt="logo">
+  <h1>PLC S7 模拟器</h1>
+  <span class="sub">DB 块浏览器 · 左侧列表，右侧字段配置</span>
+  <span class="badge" id="modeBadge"></span>
+  <div class="toolbar">
+    <button class="ghost sm" onclick="toggleTheme()" title="切换暗色 / 亮色主题">主题：<span id="themeLabel">暗色</span></button>
+    <button class="ghost sm" onclick="toggleAuto()">自动刷新：<span id="auto">关</span></button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-head">
+      <strong>数据块</strong>
+      <div class="side-actions">
+        <button class="sm green" onclick="showCreate()">＋新建</button>
+        <button class="sm ghost" title="导出全部数据块" onclick="exportAllDBs()">导出</button>
+        <button class="sm ghost" title="导入数据块（JSON 文件）" onclick="triggerImport()">导入</button>
+        <button class="sm ghost" title="从数据库重新加载全部" onclick="reloadAll()">↻</button>
+      </div>
+    </div>
+    <ul id="dbList" class="db-list"></ul>
+  </aside>
+
+  <main class="content">
+    <div id="detail"><div class="card"><div class="empty">请选择左侧数据块</div></div></div>
+
+    <div class="card">
+      <h2>原始查询 <span class="badge">任意 DB 字节</span></h2>
+      <div class="query">
+        <label>DB <input id="qDb" type="number" value="1" style="width:70px"></label>
+        <label>偏移 <input id="qOff" type="number" value="0" style="width:80px"></label>
+        <label>长度 <input id="qLen" type="number" value="32" style="width:80px"></label>
+        <button onclick="rawQuery()">查询</button>
+      </div>
+      <div id="rawOut" class="raw">—</div>
+    </div>
+  </main>
+</div>
+
+<div id="ctx" class="ctx" style="display:none">
+  <div onclick="ctxRename()">重命名</div>
+  <div onclick="ctxClone()">复制副本</div>
+  <div onclick="ctxExport()">导出此 DB</div>
+  <div class="danger" onclick="ctxDelete()">删除</div>
+</div>
+
+<input type="file" id="importFile" accept="application/json,.json" style="display:none">
+
+<div id="modal" class="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">取消</button>
+      <button class="green" id="modalOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+</body>
+</html>

@@ -1,0 +1,45 @@
+# Task 入口：wails3 build / wails3 package 会通过本项目根目录的 Taskfile 路由。
+# GUI 与 Web 的构建细节分别由 build/gui.ps1 与 build/web.ps1 承担。
+version: '3'
+
+tasks:
+  default:
+    desc: 构建 Windows GUI 客户端（等价于 build）
+    cmds:
+      - task: build
+
+  build:
+    desc: 构建 Windows GUI 客户端（前端 + Go 嵌入 + 纯 Go 编译）
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/gui.ps1
+
+  build:gui:
+    desc: 构建 GUI 客户端（别名）
+    cmds:
+      - task: build
+
+  build:web:
+    desc: 构建 Web 服务（前端 + Go 嵌入 + 纯 Go 编译）
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/web.ps1
+
+  build:all:
+    desc: 同时构建 GUI 与 Web
+    cmds:
+      - task: build
+      - task: build:web
+
+  package:
+    desc: 打包入口（当前为单文件 exe，等价于 build）
+    cmds:
+      - task: build
+
+  bindings:
+    desc: 重新生成 Wails 前端绑定
+    cmds:
+      - wails3 generate bindings -names -i -d ./frontend/src/bindings ./internal/bridge
+
+  verify:
+    desc: 双模式校验（Go 构建/vet/测试、前端类型检查与两套构建）
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File ./build/verify.ps1

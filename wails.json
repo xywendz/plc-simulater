@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v3.json",
+  "name": "plc-simulater",
+  "frontend": {
+    "dir": "frontend",
+    "install": "npm install",
+    "build": "npm run build",
+    "dev": "npm run dev",
+    "serve": "http://localhost:34115",
+    "port": 34115
+  },
+  "assetdir": "cmd/plc-simulater-gui/assets",
+  "build": {
+    "outputfilename": "plc-simulater-gui.exe",
+    "ldflags": "-X plc-simulater/internal/bridge.Version=dev"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "fixed": {
+    "file_version": "1.0.0"
+  },
+  "info": {
+    "0409": {
+      "ProductVersion": "1.0.0",
+      "CompanyName": "plc-simulater",
+      "FileDescription": "PLC S7 Protocol Simulator",
+      "ProductName": "plc-simulater",
+      "Comments": "S7 protocol simulator with DB block browser (Web + GUI)"
+    }
+  }
+}

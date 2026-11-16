@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S7 模拟器 · DB 浏览器</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#172026; --panel2:#1e2a32; --line:#2a3742;
+    --txt:#e6edf3; --muted:#8b9aa7; --accent:#2f81f7; --accent2:#3fb950;
+    --warn:#d29922; --err:#f85149;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--txt)}
+  header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+    background:linear-gradient(90deg,#172026,#0f1419);border-bottom:1px solid var(--line)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .sub{color:var(--muted);font-size:12px}
+  header .toolbar{margin-left:auto;display:flex;gap:8px;align-items:center}
+  button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 13px;
+    cursor:pointer;font-size:13px;font-weight:500}
+  button:hover{filter:brightness(1.08)}
+  button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+  button.green{background:var(--accent2)}
+  button.danger{background:var(--err)}
+  button.sm{padding:3px 8px;font-size:12px}
+  select,input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:6px 9px;font-size:13px}
+  .layout{display:flex;gap:16px;align-items:flex-start;max-width:1200px;margin:0 auto;padding:18px 20px}
+  .sidebar{width:250px;flex:none;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;position:sticky;top:18px}
+  .side-head{display:flex;align-items:center;justify-content:space-between;
+    padding:12px 14px;border-bottom:1px solid var(--line)}
+  .side-head strong{font-size:13px}
+  .side-actions{display:flex;gap:6px}
+  .db-list{list-style:none;margin:0;padding:0;max-height:calc(100vh - 160px);overflow:auto}
+  .db-list li{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;
+    display:flex;flex-direction:column;gap:2px}
+  .db-list li:hover{background:var(--panel2)}
+  .db-list li.active{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+  .db-list li .nm{font-weight:500}
+  .db-list li .mt{color:var(--muted);font-size:11px}
+  .content{flex:1;min-width:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px;margin-bottom:16px}
+  .card h2{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:10px}
+  .badge{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    font-size:11px;padding:2px 8px;border-radius:20px}
+  .meta{color:var(--muted);font-size:12px;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13px}
+  th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .val-input{width:140px}
+  .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+  .switch input{width:16px;height:16px;accent-color:var(--accent2)}
+  .raw{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:10px;word-break:break-all;color:var(--muted)}
+  .ok{color:var(--accent2)} .err{color:var(--err)}
+  .toast{position:fixed;right:18px;bottom:18px;background:var(--panel2);border:1px solid var(--line);
+    padding:10px 14px;border-radius:8px;opacity:0;transition:.25s;pointer-events:none;max-width:320px}
+  .toast.show{opacity:1}
+  .query{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
+  .fieldcfg{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .ops{display:flex;gap:6px}
+  .add-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end;margin-top:10px}
+  .add-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  .empty{color:var(--muted);padding:40px;text-align:center}
+  /* 右键菜单 */
+  .ctx{position:fixed;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    z-index:60;min-width:120px;box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden}
+  .ctx div{padding:9px 16px;cursor:pointer;font-size:13px}
+  .ctx div:hover{background:var(--accent)}
+  .ctx div.danger:hover{background:var(--err)}
+  /* 弹窗 */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;
+    justify-content:center;z-index:100}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:18px;width:340px}
+  .modal-box h3{margin:0 0 12px;font-size:15px}
+  .modal-body label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);margin-bottom:12px}
+  .modal-body input{width:100%}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>PLC S7 模拟器</h1>
+  <span class="sub">DB 块浏览器 · 左侧列表，右侧字段配置</span>
+  <div class="toolbar">
+    <button class="ghost sm" onclick="toggleAuto()">自动刷新：<span id="auto">关</span></button>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-head">
+      <strong>数据块</strong>
+      <div class="side-actions">
+        <button class="sm green" onclick="showCreate()">＋新建</button>
+        <button class="sm ghost" title="从数据库重新加载全部" onclick="reloadAll()">↻</button>
+      </div>
+    </div>
+    <ul id="dbList" class="db-list"></ul>
+  </aside>
+
+  <main class="content">
+    <div id="detail"><div class="card"><div class="empty">请选择左侧数据块</div></div></div>
+
+    <div class="card">
+      <h2>原始查询 <span class="badge">任意 DB 字节</span></h2>
+      <div class="query">
+        <label>DB <input id="qDb" type="number" value="1" style="width:70px"></label>
+        <label>偏移 <input id="qOff" type="number" value="0" style="width:80px"></label>
+        <label>长度 <input id="qLen" type="number" value="32" style="width:80px"></label>
+        <button onclick="rawQuery()">查询</button>
+      </div>
+      <div id="rawOut" class="raw">—</div>
+    </div>
+  </main>
+</div>
+
+<!-- 右键菜单 -->
+<div id="ctx" class="ctx" style="display:none">
+  <div onclick="ctxRename()">重命名</div>
+  <div onclick="ctxClone()">复制副本</div>
+  <div class="danger" onclick="ctxDelete()">删除</div>
+</div>
+
+<!-- 弹窗 -->
+<div id="modal" class="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody" class="modal-body"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeModal()">取消</button>
+      <button class="green" id="modalOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let timer = null;
+let selected = null;          // 当前选中的 DB 号
+let dbsList = [];             // 左侧列表数据
+let currentFields = [];       // 当前 DB 的字段（用于编辑回填）
+let editingName = null;       // 正在编辑的字段原名（null 表示新增）
+let modalCtx = null;          // 弹窗/右键关联的 DB 号
+
+function toast(msg, ok=true){
+  const t=$('#toast'); t.textContent=msg; t.className='toast show'+(ok?'':' err');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.className='toast',2200);
+}
+function fmt(v){
+  if(typeof v==='number') return Number.isInteger(v)?v:String(Math.round(v*1e6)/1e6);
+  return v===null||v===undefined?'':String(v);
+}
+function cssId(s){return (s||'').replace(/[^a-zA-Z0-9_]/g,'_');}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+async function api(path, method, body){
+  const opt={method, headers:{'Content-Type':'application/json'}};
+  if(body!==undefined) opt.body=JSON.stringify(body);
+  const r=await fetch(path, opt);
+  if(!r.ok){ const t=await r.text(); throw new Error(t||('HTTP '+r.status)); }
+  return r.json().catch(()=>({}));
+}
+
+// ---- 左侧列表 ----
+async function loadDbList(){
+  try{
+    const r=await fetch('/api/dbs');
+    dbsList=await r.json();
+    const ul=$('#dbList'); ul.innerHTML='';
+    dbsList.forEach(d=>{
+      const li=document.createElement('li');
+      if(d.number===selected) li.className='active';
+      li.innerHTML=`<span class="nm">DB${d.number} · ${esc(d.name||'未命名')}</span>
+        <span class="mt">${d.size} 字节</span>`;
+      li.onclick=()=>selectDB(d.number);
+      li.oncontextmenu=(e)=>openCtx(e, d.number);
+      ul.appendChild(li);
+    });
+  }catch(e){ toast('加载列表失败: '+e.message,false); }
+}
+
+async function selectDB(n){
+  selected=n;
+  $('#qDb').value=n;
+  await loadDbList();
+  try{
+    const r=await fetch(`/api/db/${n}`);
+    if(!r.ok) throw new Error(await r.text());
+    renderDetail(await r.json());
+  }catch(e){ toast('查询失败: '+e.message,false); }
+}
+
+function refreshCurrent(){
+  if(selected==null) return;
+  fetch(`/api/db/${selected}`).then(r=>r.ok?r.json():null).then(db=>{ if(db) renderDetail(db); });
+}
+
+// ---- 右侧详情渲染 ----
+function renderDetail(db){
+  currentFields=(db.fields||[]).slice();
+  const fields=currentFields;
+  const head=fields.length?`<span class="badge">${fields.length} 字段</span>`:`<span class="badge">无字段</span>`;
+  const dbName=db.name?db.name:'（未命名）';
+  let html=`<div class="card"><h2>DB${db.number} ${head}
+      <button class="sm ghost" title="从数据库重新加载此块" onclick="reloadDB(${db.number})">↻ 重新加载</button>
+    </h2>
+    <div class="query" style="margin:0 0 6px">
+      <label>名称 <input id="dbName" value="${esc(dbName)}" style="width:200px"></label>
+      <button class="ghost" onclick="renameDB(${db.number})">保存名称</button>
+    </div>
+    <div class="meta">大小 ${db.size} 字节 · 偏移量按字段顺序与类型自动计算（bool/bit 按位打包，多字节类型按字节对齐）</div>`;
+
+  if(fields.length){
+    html+=`<table><thead><tr>
+      <th>#</th><th>字段名</th><th>类型</th><th>偏移</th><th>位</th><th>长度</th><th>值</th><th>操作</th>
+      </tr></thead><tbody>`;
+    fields.forEach((f,i)=>{
+      const isBit=(f.type==='bool'||f.type==='bit');
+      let ctrl;
+      if(isBit){
+        ctrl=`<label class="switch"><input type="checkbox" ${f.value?'checked':''}
+          onchange="setBit(${db.number},${f.offset},${f.bit},this.checked)">位 ${f.bit}</label>`;
+      }else{
+        ctrl=`<input class="val-input" id="v_${db.number}_${cssId(f.name)}" data-type="${f.type}" value="${fmt(f.value)}">
+          <button class="sm" onclick="setField(${db.number},'${f.name}')">写</button>`;
+      }
+      html+=`<tr>
+        <td class="mono">${i+1}</td>
+        <td class="mono">${esc(f.name)}</td>
+        <td>${f.type}</td>
+        <td class="mono">${f.offset}</td>
+        <td class="mono">${isBit?f.bit:''}</td>
+        <td class="mono">${f.length||''}</td>
+        <td class="mono">${fmt(f.value)}</td>
+        <td><div class="ops">
+          <button class="sm ghost" onclick="moveField('${f.name}',-1)">↑</button>
+          <button class="sm ghost" onclick="moveField('${f.name}',1)">↓</button>
+          <button class="sm ghost" onclick="editField('${f.name}')">编辑</button>
+          <button class="sm danger" onclick="deleteField('${f.name}')">删除</button>
+        </div></td>
+      </tr>`;
+    });
+    html+=`</tbody></table>`;
+  }else{
+    html+=`<div class="raw">${(db.raw||'').replace(/(.{2})/g,'$1 ').trim()||'（空）'}</div>
+      <div class="hint">该 DB 尚未配置字段，可在下方设置字段定义。</div>`;
+  }
+
+  html+=`<div class="fieldcfg">
+    <strong>配置字段</strong>
+    <span class="meta">填写名称与类型即可，偏移/位号由系统按字段顺序与类型自动计算并持久化（重启保留）。</span>
+    <div class="add-form">
+      <label>字段名<input id="fName" placeholder="如 MotorOn"></label>
+      <label>类型<select id="fType">
+        <option>bool</option><option>bit</option><option>byte</option>
+        <option>word</option><option>dword</option><option>int</option>
+        <option>dint</option><option>real</option><option>string</option>
+      </select></label>
+      <label>长度(string)<input id="fLen" type="number" value="0" style="width:100%"></label>
+      <label>初始值<input id="fValue" placeholder="bool:true 数值:12.5 串:abc"></label>
+      <div style="display:flex;gap:8px;align-items:end">
+        <button class="green" id="fSave" onclick="submitField()">添加字段</button>
+        <button class="ghost" id="fCancel" onclick="cancelEdit()" style="display:none">取消</button>
+      </div>
+    </div>
+  </div></div>`;
+  $('#detail').innerHTML=html;
+}
+
+function editField(name){
+  const f=currentFields.find(x=>x.name===name);
+  if(!f) return;
+  $('#fName').value=f.name;
+  $('#fType').value=f.type;
+  $('#fLen').value=f.length||0;
+  $('#fValue').value=(f.value===undefined||f.value===null)?'':fmt(f.value);
+  editingName=name;
+  $('#fSave').textContent='保存修改';
+  $('#fCancel').style.display='';
+  $('#fName').focus();
+}
+function cancelEdit(){ editingName=null; clearForm(); }
+function clearForm(){
+  $('#fName').value=''; $('#fType').value='bool'; $('#fLen').value=0; $('#fValue').value='';
+  $('#fSave').textContent='添加字段'; $('#fCancel').style.display='none';
+}
+
+// ---- 字段值/定义操作 ----
+async function setBit(db,offset,bit,val){
+  try{
+    await api(`/api/db/${db}/bit`,'POST',{offset,bit,value:val});
+    toast(`DB${db} 位 @${offset}.${bit} = ${val}`);
+    refreshCurrent();
+  }catch(e){ toast('写入失败: '+e.message,false); }
+}
+async function setField(db,name){
+  const el=$(`#v_${db}_${cssId(name)}`);
+  const raw=el.value.trim();
+  let value;
+  if(el.dataset.type==='string') value=raw;
+  else if(raw==='true'||raw==='false') value=(raw==='true');
+  else if(raw.includes('.')||raw.toLowerCase().includes('e')) value=parseFloat(raw);
+  else value=parseInt(raw,10);
+  try{
+    await api(`/api/db/${db}/set`,'POST',{name,value});
+    toast(`DB${db} 字段 ${name} = ${raw}`);
+    refreshCurrent();
+  }catch(e){ toast('写入失败: '+e.message,false); }
+}
+async function moveField(name,dir){
+  if(selected==null){ toast('请先选择数据块',false); return; }
+  try{
+    await api(`/api/db/${selected}/move`,'POST',{name,dir});
+    refreshCurrent();
+  }catch(e){ toast('移动失败: '+e.message,false); }
+}
+async function deleteField(name){
+  if(selected==null){ toast('请先选择数据块',false); return; }
+  try{
+    await api(`/api/db/${selected}/field/${encodeURIComponent(name)}`,'DELETE');
+    toast(`DB${selected} 字段 ${name} 已删除`);
+    refreshCurrent();
+  }catch(e){ toast('删除失败: '+e.message,false); }
+}
+async function submitField(){
+  if(selected==null){ toast('请先选择数据块',false); return; }
+  const name=$('#fName').value.trim();
+  if(!name){ toast('请填写字段名称',false); return; }
+  const body={ name, type:$('#fType').value, length:parseInt($('#fLen').value||'0',10) };
+  const raw=$('#fValue').value.trim();
+  if(raw!==''){
+    if(body.type==='string') body.value=raw;
+    else if(raw==='true'||raw==='false') body.value=(raw==='true');
+    else if(raw.includes('.')||raw.toLowerCase().includes('e')) body.value=parseFloat(raw);
+    else body.value=parseInt(raw,10);
+  }
+  try{
+    if(editingName && editingName!==name){
+      await api(`/api/db/${selected}/field/${encodeURIComponent(editingName)}`,'DELETE');
+    }
+    await api(`/api/db/${selected}/field`,'POST',body);
+    toast(`DB${selected} 字段 ${name} 已保存`);
+    editingName=null; clearForm();
+    refreshCurrent();
+  }catch(e){ toast('保存失败: '+e.message,false); }
+}
+async function renameDB(num){
+  const name=$('#dbName').value.trim();
+  try{
+    await api(`/api/db/${num}/rename`,'POST',{name});
+    toast(`DB${num} 名称已保存`);
+    await loadDbList();
+  }catch(e){ toast('保存名称失败: '+e.message,false); }
+}
+
+// ---- 右键菜单 ----
+let ctxNum=null;
+function openCtx(e,n){
+  e.preventDefault();
+  ctxNum=n;
+  const m=$('#ctx');
+  m.style.display='block';
+  m.style.left=Math.min(e.clientX, innerWidth-140)+'px';
+  m.style.top=Math.min(e.clientY, innerHeight-120)+'px';
+}
+function hideCtx(){ $('#ctx').style.display='none'; }
+function ctxRename(){ const n=ctxNum; hideCtx(); showRename(n); }
+function ctxClone(){ const n=ctxNum; hideCtx(); showClone(n); }
+async function ctxDelete(){
+  const n=ctxNum; hideCtx();
+  if(!confirm(`确认删除 DB${n}？该数据块及其字段定义将被移除。`)) return;
+  try{
+    await api(`/api/db/${n}`,'DELETE');
+    toast(`已删除 DB${n}`);
+    if(selected===n){ selected=null; $('#detail').innerHTML='<div class="card"><div class="empty">请选择左侧数据块</div></div>'; }
+    await loadDbList();
+  }catch(e){ toast('删除失败: '+e.message,false); }
+}
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#ctx') && !e.target.closest('.db-list li')) hideCtx();
+});
+
+// ---- 弹窗（新建 / 重命名 / 复制）----
+function showModal(title, bodyHTML, onOk){
+  $('#modalTitle').textContent=title;
+  $('#modalBody').innerHTML=bodyHTML;
+  $('#modalOk').onclick=onOk;
+  $('#modal').style.display='flex';
+}
+function closeModal(){ $('#modal').style.display='none'; }
+
+function showCreate(){
+  modalCtx=null;
+  showModal('新建数据块', `
+    <label>DB 号 <input id="mNum" type="number" placeholder="如 200"></label>
+    <label>名称 <input id="mName" placeholder="可选"></label>
+    <label>大小(字节) <input id="mSize" type="number" value="128"></label>`, okCreate);
+  setTimeout(()=>$('#mNum').focus(),30);
+}
+async function okCreate(){
+  const num=parseInt($('#mNum').value,10), size=parseInt($('#mSize').value,10);
+  const name=$('#mName').value.trim();
+  if(!num||!size){ toast('请填写 DB 号与大小',false); return; }
+  try{
+    await api('/api/db','POST',{number:num,size,name});
+    closeModal(); toast(`DB${num} 已创建`);
+    await loadDbList(); selectDB(num);
+  }catch(e){ toast('创建失败: '+e.message,false); }
+}
+function showRename(n){
+  modalCtx=n;
+  const d=dbsList.find(x=>x.number===n);
+  const cur=d?d.name:'';
+  showModal('重命名 DB'+n, `<label>名称 <input id="mName" value="${esc(cur)}"></label>`, okRename);
+  setTimeout(()=>$('#mName').focus(),30);
+}
+async function okRename(){
+  const n=modalCtx;
+  const name=$('#mName').value.trim();
+  try{
+    await api(`/api/db/${n}/rename`,'POST',{name});
+    closeModal(); toast('名称已保存');
+    await loadDbList(); if(selected===n) selectDB(n);
+  }catch(e){ toast('保存失败: '+e.message,false); }
+}
+function showClone(n){
+  modalCtx=n;
+  const d=dbsList.find(x=>x.number===n);
+  const cur=d?d.name:'';
+  showModal('复制 DB'+n+' 为', `
+    <label>新 DB 号 <input id="mNum" type="number" placeholder="如 201"></label>
+    <label>新名称 <input id="mName" value="${esc(cur?cur+'副本':'')}"></label>`, okClone);
+  setTimeout(()=>$('#mNum').focus(),30);
+}
+async function okClone(){
+  const src=modalCtx;
+  const num=parseInt($('#mNum').value,10);
+  const name=$('#mName').value.trim();
+  if(!num){ toast('请填写新 DB 号',false); return; }
+  try{
+    await api('/api/db/clone','POST',{src, number:num, name});
+    closeModal(); toast(`已复制为 DB${num}`);
+    await loadDbList(); selectDB(num);
+  }catch(e){ toast('复制失败: '+e.message,false); }
+}
+
+// ---- 从数据库重新加载 ----
+async function reloadDB(n){
+  try{
+    await api(`/api/db/${n}/reload`,'POST');
+    toast(`DB${n} 已从数据库重新加载`);
+    await loadDbList(); selectDB(n);
+  }catch(e){ toast('重新加载失败: '+e.message,false); }
+}
+async function reloadAll(){
+  try{
+    await api('/api/reload','POST');
+    toast('已全部从数据库重新加载');
+    await loadDbList(); if(selected!=null) selectDB(selected);
+  }catch(e){ toast('重新加载失败: '+e.message,false); }
+}
+
+// ---- 原始查询 ----
+async function rawQuery(){
+  const db=$('#qDb').value, off=$('#qOff').value, len=$('#qLen').value;
+  try{
+    const r=await fetch(`/api/raw?db=${db}&offset=${off}&len=${len}`);
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'error');
+    $('#rawOut').textContent=d.hex.replace(/(.{2})/g,'$1 ').trim();
+  }catch(e){ toast('查询失败: '+e.message,false); }
+}
+
+function toggleAuto(){
+  const s=$('#auto');
+  if(timer){ clearInterval(timer); timer=null; s.textContent='关'; }
+  else{ timer=setInterval(refreshCurrent,2000); s.textContent='开(2s)'; }
+}
+
+(async function init(){
+  await loadDbList();
+  if(dbsList.length) selectDB(dbsList[0].number);
+})();
+</script>
+</body>
+</html>

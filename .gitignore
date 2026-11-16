@@ -1,0 +1,20 @@
+*.exe
+*.db
+pkg
+bin
+.vscode
+dist
+dist-web
+node_modules
+
+# 图标构建中间产物（均由仓库根 logo.png 经 build/gui.ps1 重新生成）
+build/windows/icon.ico
+cmd/plc-simulater-gui/rsrc_windows_*.syso
+
+# 构建产物目录整体忽略，但保留占位 index.html，
+# 使新克隆仓库在未构建前端时 go build ./... 仍可通过（//go:embed 需要目录非空）。
+cmd/plc-simulater-gui/assets/*
+!cmd/plc-simulater-gui/assets/index.html
+!internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/index.html

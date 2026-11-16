@@ -1,0 +1,100 @@
+:root{
+  --bg:#0f1419; --panel:#172026; --panel2:#1e2a32; --line:#2a3742;
+  --txt:#e6edf3; --muted:#8b9aa7; --accent:#2f81f7; --accent2:#3fb950;
+  --warn:#d29922; --err:#f85149;
+  --header-bg:linear-gradient(90deg,#172026,#0f1419);
+  --toast-bg:var(--panel2);
+}
+[data-theme="light"]{
+  --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d8dee4;
+  --txt:#1f2328; --muted:#57606a; --accent:#0969da; --accent2:#1a7f37;
+  --warn:#9a6700; --err:#cf222e;
+  --header-bg:linear-gradient(90deg,#ffffff,#f6f8fa);
+  --toast-bg:#ffffff;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg);color:var(--txt)}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+  background:var(--header-bg);border-bottom:1px solid var(--line)}
+header .logo{width:24px;height:24px;flex:none}
+header h1{font-size:16px;margin:0;font-weight:600}
+header .sub{color:var(--muted);font-size:12px}
+header .toolbar{margin-left:auto;display:flex;gap:8px;align-items:center}
+button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 13px;
+  cursor:pointer;font-size:13px;font-weight:500}
+button:hover{filter:brightness(1.08)}
+button.ghost{background:var(--panel2);color:var(--txt);border:1px solid var(--line)}
+button.green{background:var(--accent2)}
+button.danger{background:var(--err)}
+button.sm{padding:3px 8px;font-size:12px}
+select,input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+  border-radius:6px;padding:6px 9px;font-size:13px}
+.layout{display:flex;gap:16px;align-items:flex-start;max-width:1200px;margin:0 auto;padding:18px 20px}
+.sidebar{width:250px;flex:none;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;overflow:hidden;position:sticky;top:18px}
+.side-head{display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;border-bottom:1px solid var(--line)}
+.side-head strong{font-size:13px}
+.side-actions{display:flex;gap:6px}
+.db-list{list-style:none;margin:0;padding:0;max-height:calc(100vh - 160px);overflow:auto}
+.db-list li{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;
+  display:flex;flex-direction:column;gap:2px}
+.db-list li:hover{background:var(--panel2)}
+.db-list li.active{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.db-list li .nm{font-weight:500}
+.db-list li .mt{color:var(--muted);font-size:11px}
+.content{flex:1;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:16px;margin-bottom:16px}
+.card h2{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:10px}
+.badge{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+  font-size:11px;padding:2px 8px;border-radius:20px}
+.meta{color:var(--muted);font-size:12px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* 固定布局的字段表：列宽只由 colgroup 决定，与单元格内容（含编辑控件）无关。
+   行高固定为 20px（content height），使编辑控件外框高度与之完全一致。 */
+table.fields{table-layout:fixed}
+table.fields th,table.fields td{line-height:20px}
+table.fields td{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.val-input{width:140px}
+.edit-cell{cursor:pointer}
+.edit-cell:hover{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--line)}
+/* 编辑控件 height:20px + 全局 box-sizing:border-box，外框恰好等于行高，
+   加上边框也不会撑大行，编辑切换时行高保持不变。 */
+.edit-cell input[type=text]{width:100%;height:20px;background:var(--panel);color:var(--txt);
+  border:1px solid var(--accent);border-radius:4px;padding:0 6px;font:inherit}
+.edit-cell select{width:100%;height:20px;background:var(--panel);color:var(--txt);
+  border:1px solid var(--accent);border-radius:4px;padding:0 2px;font:inherit}
+.val-cell input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent2);cursor:pointer;vertical-align:middle}
+.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.switch input{width:16px;height:16px;accent-color:var(--accent2)}
+.raw{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;padding:10px;word-break:break-all;color:var(--muted)}
+.ok{color:var(--accent2)} .err{color:var(--err)}
+.toast{position:fixed;right:18px;bottom:18px;background:var(--panel2);border:1px solid var(--line);
+  padding:10px 14px;border-radius:8px;opacity:0;transition:.25s;pointer-events:none;max-width:320px}
+.toast.show{opacity:1}
+.query{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.hint{color:var(--muted);font-size:12px;margin-top:6px}
+.fieldcfg{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.ops{display:flex;gap:6px}
+.add-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end;margin-top:10px}
+.add-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.empty{color:var(--muted);padding:40px;text-align:center}
+.ctx{position:fixed;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  z-index:60;min-width:120px;box-shadow:0 8px 24px rgba(0,0,0,.4);overflow:hidden}
+.ctx div{padding:9px 16px;cursor:pointer;font-size:13px}
+.ctx div:hover{background:var(--accent)}
+.ctx div.danger:hover{background:var(--err)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;
+  justify-content:center;z-index:100}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:18px;width:340px}
+.modal-box h3{margin:0 0 12px;font-size:15px}
+.modal-body label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);margin-bottom:12px}
+.modal-body input{width:100%}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px}

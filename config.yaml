@@ -1,0 +1,30 @@
+# S7 协议模拟器配置
+# 监听地址：ISO-on-TCP 标准端口为 102
+listen: "0.0.0.0:102"
+
+# HTTP 管理界面监听地址（内置静态页面，可浏览/查询/修改 DB 块值）。
+# 留空则不启用 HTTP 服务。
+http_listen: ":8070"
+
+# SQLite 数据库文件路径：记录 DB 块及其字段定义（名称/偏移/类型）。
+# 字段配置会持久化到该文件，重启后仍保留，并作为字段定义的唯一真源。
+db_path: "plc-simulater.db"
+
+# 协商的 S7 PDU 最大长度（字节）
+max_pdu_size: 240
+
+# 数据块定义
+dbs:
+  - number: 1
+    name: "过程数据"
+    size: 128
+    fields:
+      - { name: "TankLevel",   offset: 0,  type: real,  value: 12.5 }
+      - { name: "PumpRunning", offset: 4,  type: bool,  bit: 0, value: true }
+      - { name: "Fault",       offset: 4,  type: bool,  bit: 1, value: false }
+      - { name: "StatusWord",  offset: 8,  type: word,  value: 0x01FF }
+      - { name: "Counter",     offset: 12, type: dword, value: 1000 }
+      - { name: "Temperature", offset: 16, type: int,   value: -25 }
+      - { name: "Pressure",    offset: 24, type: real,  value: 1.013 }
+      - { name: "ProductName", offset: 32, type: string, length: 20, value: "Hello S7" }
+  
