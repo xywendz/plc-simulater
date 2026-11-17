@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"encoding/json"
 	"testing"
 
 	"plc-simulater/config"
@@ -143,6 +144,138 @@ func TestImportAllCreatesMissing(t *testing.T) {
 	if view.Name != "覆盖后" {
 		t.Fatalf("覆盖导入后名称 = %q", view.Name)
 	}
+}
+
+func TestImportFieldNameTypeAliases(t *testing.T) {
+	b := newTestBridge(t)
+
+	// 模拟外部工具导出的文件：字段使用别名键名与别名类型值。
+	raw := `{
+		"version": "external",
+		"dbs": [{
+			"number": 12,
+			"name": "外部导入",
+			"size": 16,
+			"columns": [
+				{"fieldName": "Enable", "dataType": "BOOL", "value": true},
+				{"field_name": "Setpoint", "data_type": "float", "value": 3.5},
+				{"columnName": "Mode", "fieldType": "uint16", "value": 2}
+			]
+		}]
+	}`
+	var bundle ExportBundle
+	if err := json.Unmarshal([]byte(raw), &bundle); err != nil {
+		t.Fatalf("解析别名键名 JSON: %v", err)
+	}
+	if len(bundle.DBs) != 1 || len(bundle.DBs[0].Fields) != 3 {
+		t.Fatalf("字段解析失败: %+v", bundle)
+	}
+	if got := bundle.DBs[0].Fields[0]; got.Name != "Enable" || got.Type != "BOOL" {
+		t.Fatalf("别名字段解析结果不符: %+v", got)
+	}
+
+	n, err := b.ImportAll(bundle)
+	if err != nil {
+		t.Fatalf("导入别名键名文件: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("导入数量 = %d, 期望 1", n)
+	}
+
+	view, err := b.GetDB(12)
+	if err != nil {
+		t.Fatalf("GetDB(12): %v", err)
+	}
+	want := map[string]string{"Enable": "bool", "Setpoint": "real", "Mode": "word"}
+	if len(view.Fields) != len(want) {
+		t.Fatalf("字段数 = %d, 期望 %d: %+v", len(view.Fields), len(want), view.Fields)
+	}
+	for _, f := range view.Fields {
+		if f.Type != want[f.Name] {
+			t.Fatalf("字段 %s 类型 = %q, 期望 %q", f.Name, f.Type, want[f.Name])
+		}
+	}
+}
+
+func TestImportRejectsFieldsWithoutNameType(t *testing.T) {
+	b := newTestBridge(t)
+
+	// 先导入一个有效块，用于验证后续导入失败时不会被清空。
+	valid := ExportBundle{DBs: []ExportedDB{{
+		Number: 20,
+		Size:   8,
+		Fields: []ExportedField{{Name: "Keep", Type: "bool", Value: true}},
+	}}}
+	if _, err := b.ImportAll(valid); err != nil {
+		t.Fatalf("准备数据: %v", err)
+	}
+
+	invalid := ExportedDB{
+		Number: 20,
+		Size:   8,
+		Fields: []ExportedField{{Name: "", Type: "bool"}},
+	}
+	if err := b.ImportDB(invalid); err == nil {
+		t.Fatal("缺少字段名称应返回错误")
+	}
+
+	view, err := b.GetDB(20)
+	if err != nil {
+		t.Fatalf("导入失败后原 DB 不应被删除: %v", err)
+	}
+	if len(view.Fields) != 1 || view.Fields[0].Name != "Keep" {
+		t.Fatalf("导入失败后原字段被清空: %+v", view.Fields)
+	}
+}
+
+func TestImportChineseValueWithGappedOffsets(t *testing.T) {
+	newBridge := func(path string) *Bridge {
+		cfg := config.Default()
+		cfg.DBPath = path
+		cfg.Listen = "127.0.0.1:0"
+		srv, err := s7.New(cfg)
+		if err != nil {
+			t.Fatalf("s7.New: %v", err)
+		}
+		t.Cleanup(func() { srv.Close() })
+		return New(srv, "127.0.0.1:0", 240)
+	}
+
+	src := newBridge(t.TempDir() + "/src.db")
+	if err := src.SetField(1, "ProductName", "中文测试"); err != nil {
+		t.Fatalf("SetField: %v", err)
+	}
+	bundle, err := src.ExportDB(1)
+	if err != nil {
+		t.Fatalf("ExportDB: %v", err)
+	}
+	var exported string
+	for _, f := range bundle.DBs[0].Fields {
+		if f.Name == "ProductName" {
+			exported, _ = f.Value.(string)
+		}
+	}
+	if exported != "中文测试" {
+		t.Fatalf("导出值 = %q, 期望 中文测试", exported)
+	}
+
+	dst := newBridge(t.TempDir() + "/dst.db")
+	if _, err := dst.ImportAll(bundle); err != nil {
+		t.Fatalf("ImportAll: %v", err)
+	}
+	view, err := dst.GetDB(1)
+	if err != nil {
+		t.Fatalf("GetDB: %v", err)
+	}
+	for _, f := range view.Fields {
+		if f.Name == "ProductName" {
+			if f.Value != "中文测试" {
+				t.Fatalf("导入值 = %q (类型 %T), 期望 中文测试", f.Value, f.Value)
+			}
+			return
+		}
+	}
+	t.Fatal("导入后未找到 ProductName 字段")
 }
 
 func TestExportAllSortedAndRejectsInvalid(t *testing.T) {

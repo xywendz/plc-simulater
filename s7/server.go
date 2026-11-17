@@ -425,6 +425,32 @@ func (s *Server) UpsertField(number int, f store.FieldMeta) error {
 	return nil
 }
 
+// RestoreFieldLayout 按给定的偏移/位号恢复字段定义，不重新打包。
+// 用于导入包含原始字节（raw）的数据块：字段偏移必须与原始字节布局一致，
+// 否则读取字符串等类型时会因偏移错位而乱码。
+func (s *Server) RestoreFieldLayout(number int, fields []store.FieldMeta) error {
+	db := s.DB(number)
+	if db == nil {
+		return fmt.Errorf("DB%d not found", number)
+	}
+	mf := make([]model.Field, 0, len(fields))
+	for _, f := range fields {
+		f.DBNumber = number
+		if err := s.store.UpsertField(f); err != nil {
+			return err
+		}
+		mf = append(mf, model.Field{
+			Name: f.Name, Offset: f.Offset, Type: f.Type,
+			Bit: f.Bit, Length: f.Length,
+		})
+	}
+	if err := db.SetFields(mf); err != nil {
+		return err
+	}
+	s.logger.Printf("恢复 DB%d 字段布局: %d 个字段（保留原始偏移）", number, len(fields))
+	return nil
+}
+
 // DeleteField 删除指定 DB 的具名字段定义（从持久化与运行时移除）。
 // 删除后会重新打包，使后续字段偏移前移。
 func (s *Server) DeleteField(number int, name string) error {

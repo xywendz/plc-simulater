@@ -686,12 +686,33 @@ function triggerImport(): void {
 }
 
 // 兼容两种文件内容：整体导出包 {version, dbs:[...]} 或单块导出 {number, ...}。
+// 同时兼容常见字段定义键名，避免外部文件因键名不一致而丢失字段名称与类型。
 function normalizeBundle(parsed: any): ExportBundle | null {
+  const pick = (obj: any, keys: string[]): any => {
+    for (const k of keys) if (obj?.[k] != null && obj[k] !== "") return obj[k];
+    return undefined;
+  };
+  const normalizeField = (f: any): any => {
+    if (!f || typeof f !== "object") return f;
+    return {
+      name: pick(f, ["name", "fieldName", "field_name", "field", "columnName", "column_name", "column"]),
+      type: pick(f, ["type", "dataType", "data_type", "fieldType", "field_type", "valueType", "value_type"]),
+      offset: f.offset ?? 0,
+      bit: f.bit ?? 0,
+      length: f.length ?? 0,
+      value: f.value,
+    };
+  };
+  const normalizeDB = (db: any): any => {
+    if (!db || typeof db !== "object") return db;
+    const rawFields = pick(db, ["fields", "columns", "Columns", "fieldDefinitions", "field_definitions"]);
+    return { ...db, fields: Array.isArray(rawFields) ? rawFields.map(normalizeField) : [] };
+  };
   if (parsed && Array.isArray(parsed.dbs) && parsed.dbs.length > 0) {
-    return { version: parsed.version ?? "", exportedAt: parsed.exportedAt, dbs: parsed.dbs };
+    return { version: parsed.version ?? "", exportedAt: parsed.exportedAt, dbs: parsed.dbs.map(normalizeDB) };
   }
   if (parsed && typeof parsed.number === "number") {
-    return { version: parsed.version ?? "", exportedAt: parsed.exportedAt, dbs: [parsed] };
+    return { version: parsed.version ?? "", exportedAt: parsed.exportedAt, dbs: [normalizeDB(parsed)] };
   }
   return null;
 }
@@ -712,6 +733,20 @@ async function handleImportFile(ev: Event): Promise<void> {
   const bundle = normalizeBundle(parsed);
   if (!bundle) {
     toast("导入文件格式不正确：缺少 dbs 数组或单块 number 字段", false);
+    return;
+  }
+
+  const badFields: string[] = [];
+  for (const db of bundle.dbs) {
+    (db.fields ?? []).forEach((f, i) => {
+      if (!String(f.name ?? "").trim() || !String(f.type ?? "").trim()) {
+        badFields.push(`DB${db.number} 第 ${i + 1} 个字段`);
+      }
+    });
+  }
+  if (badFields.length) {
+    const preview = badFields.slice(0, 5).join("、") + (badFields.length > 5 ? "…" : "");
+    toast(`导入中止：${preview} 缺少名称或类型，请检查文件字段定义`, false);
     return;
   }
 
