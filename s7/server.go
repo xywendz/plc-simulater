@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"plc-simulater/config"
@@ -42,54 +43,68 @@ func New(cfg *config.Config) (*Server, error) {
 		logger: log.Default(),
 	}
 	for _, dbCfg := range cfg.DBs {
+		// 用配置字段构造初始字节（首次运行时作为初始 raw）。
 		fields := make([]model.Field, 0, len(dbCfg.Fields))
 		for _, f := range dbCfg.Fields {
 			fields = append(fields, model.Field{
-				Name:   f.Name,
-				Offset: f.Offset,
-				Type:   f.Type,
-				Bit:    f.Bit,
-				Length: f.Length,
-				Value:  f.Value,
+				Name: f.Name, Offset: f.Offset, Type: f.Type,
+				Bit: f.Bit, Length: f.Length, Value: f.Value,
 			})
 		}
-		db, err := model.NewDB(dbCfg.Number, dbCfg.Size, dbCfg.Name, fields)
+		initDB, err := model.NewDB(dbCfg.Number, dbCfg.Size, dbCfg.Name, fields)
 		if err != nil {
 			_ = st.Close()
 			return nil, err
 		}
-		s.dbs[dbCfg.Number] = db
 
-		// 持久化 DB 元数据；若该 DB 尚无字段记录，则从配置播种。
-		if err := s.store.UpsertDB(store.DBMeta{Number: dbCfg.Number, Size: db.Size(), Name: dbCfg.Name}); err != nil {
+		// 读取已有元数据，UpsertDB 时保留已落库的 raw，避免重启时被清空。
+		existingMeta, _ := s.store.GetDB(dbCfg.Number)
+		metaRaw := []byte(nil)
+		if existingMeta != nil {
+			metaRaw = existingMeta.Raw
+		}
+		if err := s.store.UpsertDB(store.DBMeta{Number: dbCfg.Number, Size: initDB.Size(), Name: dbCfg.Name, Raw: metaRaw}); err != nil {
 			_ = st.Close()
 			return nil, err
 		}
 		if existing, _ := s.store.GetFields(dbCfg.Number); len(existing) == 0 {
 			for i, f := range dbCfg.Fields {
 				if err := s.store.UpsertField(store.FieldMeta{
-					DBNumber: dbCfg.Number,
-					Name:     f.Name,
-					Offset:   f.Offset,
-					Type:     f.Type,
-					Bit:      f.Bit,
-					Length:   f.Length,
-					Ord:      i + 1,
-					Value:    f.Value,
+					DBNumber: dbCfg.Number, Name: f.Name, Offset: f.Offset,
+					Type: f.Type, Bit: f.Bit, Length: f.Length,
+					Ord: i + 1, Value: f.Value,
 				}); err != nil {
 					_ = st.Close()
 					return nil, err
 				}
 			}
 		}
-		// 以 SQLite 中记录的字段定义作为运行时字段表（唯一真源），
-		// 并将配置初始值写回字节，使显示与持久化一致。
-		if stored, _ := s.store.GetFields(dbCfg.Number); len(stored) > 0 {
-			if err := applyStoredFields(db, stored); err != nil {
+
+		stored, _ := s.store.GetFields(dbCfg.Number)
+		meta, _ := s.store.GetDB(dbCfg.Number)
+		var db *model.DB
+		if meta != nil && len(meta.Raw) == meta.Size {
+			// 库里已有整块原始字节（S7/HTTP 写入的结果）：以它为真相源重建。
+			db, err = s.rebuildDBFromMeta(meta, stored)
+			if err != nil {
+				_ = st.Close()
+				return nil, err
+			}
+		} else {
+			// 首次运行或旧库无 raw：用配置初始字节建块，并落库为初始 raw。
+			db = initDB
+			if len(stored) > 0 {
+				if err := applyStoredFields(db, stored); err != nil {
+					_ = st.Close()
+					return nil, err
+				}
+			}
+			if err := s.persistDBRawFor(db); err != nil {
 				_ = st.Close()
 				return nil, err
 			}
 		}
+		s.dbs[dbCfg.Number] = db
 	}
 	// 载入仅存在于 SQLite（通过 API 动态创建）的数据块，使重启后仍能恢复。
 	storedDBs, _ := s.store.GetDBs()
@@ -97,16 +112,11 @@ func New(cfg *config.Config) (*Server, error) {
 		if _, exists := s.dbs[m.Number]; exists {
 			continue
 		}
-		db, err := model.NewDB(m.Number, m.Size, m.Name, nil)
+		fields, _ := s.store.GetFields(m.Number)
+		db, err := s.rebuildDBFromMeta(&m, fields)
 		if err != nil {
 			_ = st.Close()
 			return nil, err
-		}
-		if fields, _ := s.store.GetFields(m.Number); len(fields) > 0 {
-			if err := applyStoredFields(db, fields); err != nil {
-				_ = st.Close()
-				return nil, err
-			}
 		}
 		s.dbs[m.Number] = db
 		s.logger.Printf("  从 SQLite 载入 DB%d: %d bytes", m.Number, db.Size())
@@ -196,6 +206,30 @@ func (s *Server) DBs() map[int]*model.DB {
 	return out
 }
 
+// PersistDBRaw 将指定 DB 的整块内存字节持久化到 SQLite（供 bridge 导入等场景调用）。
+func (s *Server) PersistDBRaw(number int) error {
+	return s.persistDBRaw(number)
+}
+
+// persistDBRaw 将指定 DB 的整块内存字节持久化到 SQLite。
+// 调用方不应持有 s.mu 写锁（内部取 DB 时用 RLock）；持锁场景请使用 persistDBRawFor。
+func (s *Server) persistDBRaw(number int) error {
+	db := s.DB(number)
+	if db == nil {
+		return fmt.Errorf("DB%d not found", number)
+	}
+	return s.persistDBRawFor(db)
+}
+
+// persistDBRawLocked 将给定 DB 的整块内存字节持久化，不访问 s.dbs，可用于持锁场景。
+func (s *Server) persistDBRawFor(db *model.DB) error {
+	raw, err := db.Read(0, db.Size())
+	if err != nil {
+		return err
+	}
+	return s.store.UpdateDBRaw(db.Number, raw)
+}
+
 // CreateDB 动态创建一个新的数据块（持久化到 SQLite 并加入运行时）。
 func (s *Server) CreateDB(number, size int, name string) error {
 	if number <= 0 || number > 0xFFFF {
@@ -214,7 +248,12 @@ func (s *Server) CreateDB(number, size int, name string) error {
 		return err
 	}
 	s.dbs[number] = db
-	if err := s.store.UpsertDB(store.DBMeta{Number: number, Size: size, Name: name}); err != nil {
+	raw, err := db.Read(0, db.Size())
+	if err != nil {
+		delete(s.dbs, number)
+		return err
+	}
+	if err := s.store.UpsertDB(store.DBMeta{Number: number, Size: size, Name: name, Raw: raw}); err != nil {
 		delete(s.dbs, number)
 		return err
 	}
@@ -280,7 +319,21 @@ func (s *Server) CloneDB(src, dst int, name string, size int) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.UpsertDB(store.DBMeta{Number: dst, Size: size, Name: name}); err != nil {
+	// 复制源块的原始字节，使副本的值与源一致（目标更大时仅复制源大小范围）。
+	copyLen := size
+	if srcDB.Size() < copyLen {
+		copyLen = srcDB.Size()
+	}
+	srcRaw, err := srcDB.Read(0, copyLen)
+	if err != nil {
+		return err
+	}
+	raw := make([]byte, size)
+	copy(raw, srcRaw)
+	if err := db.Write(0, raw); err != nil {
+		return err
+	}
+	if err := s.store.UpsertDB(store.DBMeta{Number: dst, Size: size, Name: name, Raw: raw}); err != nil {
 		return err
 	}
 	// 复制字段（保留顺序 ord 与初始值），随后重新打包计算偏移。
@@ -334,6 +387,43 @@ func (s *Server) ReloadAll() error {
 	return nil
 }
 
+// rebuildDBFromMeta 依据持久化的元数据与字段定义重建内存数据块。
+// 若保存了整块原始字节（Raw）则以其为字节真相源；否则（旧库）回退用字段初始值重建。
+// 两种方式下字段元数据都只用于解释字节，不会覆盖已恢复的 raw。
+func (s *Server) rebuildDBFromMeta(meta *store.DBMeta, fields []store.FieldMeta) (*model.DB, error) {
+	db, err := model.NewDB(meta.Number, meta.Size, meta.Name, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(meta.Raw) == meta.Size {
+		// 新格式：整块原始字节是真相源（含非字段区字节）。
+		if err := db.Write(0, meta.Raw); err != nil {
+			return nil, err
+		}
+		if err := db.SetFields(storedToModelFields(fields)); err != nil {
+			return nil, err
+		}
+	} else {
+		// 旧库兼容：没有整块 raw 时，用字段初始值重建字节。
+		if err := applyStoredFields(db, fields); err != nil {
+			return nil, err
+		}
+	}
+	return db, nil
+}
+
+// storedToModelFields 只取字段元数据，不携带 Value（避免覆盖已恢复的原始字节）。
+func storedToModelFields(stored []store.FieldMeta) []model.Field {
+	out := make([]model.Field, 0, len(stored))
+	for _, f := range stored {
+		out = append(out, model.Field{
+			Name: f.Name, Offset: f.Offset, Type: f.Type,
+			Bit: f.Bit, Length: f.Length,
+		})
+	}
+	return out
+}
+
 // reloadDBLocked 在持有锁的前提下从 SQLite 重建单个内存数据块。
 func (s *Server) reloadDBLocked(number int) error {
 	meta, err := s.store.GetDB(number)
@@ -344,17 +434,9 @@ func (s *Server) reloadDBLocked(number int) error {
 		return fmt.Errorf("DB%d 在数据库中不存在", number)
 	}
 	fields, _ := s.store.GetFields(number)
-	db, err := model.NewDB(number, meta.Size, meta.Name, nil)
+	db, err := s.rebuildDBFromMeta(meta, fields)
 	if err != nil {
 		return err
-	}
-	for _, f := range fields {
-		if err := db.AddField(model.Field{
-			Name: f.Name, Offset: f.Offset, Type: f.Type,
-			Bit: f.Bit, Length: f.Length, Value: f.Value,
-		}); err != nil {
-			return err
-		}
 	}
 	s.dbs[number] = db
 	s.logger.Printf("从数据库重新加载 DB%d", number)
@@ -413,15 +495,68 @@ func (s *Server) UpsertField(number int, f store.FieldMeta) error {
 	if err := db.SetFields(mf); err != nil {
 		return err
 	}
-	// 若本次提供了初始值（新增字段或显式修改值），写入对应字节。
+	// 若本次提供了初始值（新增字段或显式修改值），写入对应字节并落库。
 	if f.Value != nil {
 		for _, p := range packed {
 			if p.Name == f.Name {
 				_ = db.SetField(model.Field{Name: p.Name, Offset: p.Offset, Type: p.Type, Bit: p.Bit, Length: p.Length}, f.Value)
 			}
 		}
+		if err := s.persistDBRaw(number); err != nil {
+			return err
+		}
 	}
 	s.logger.Printf("配置 DB%d 字段 %s (类型=%s 偏移=%d.%d)", number, f.Name, f.Type, f.Offset, f.Bit)
+	return nil
+}
+
+// SetFieldValue 修改具名字段的值并持久化到 SQLite。
+// 先写内存再持久化；持久化失败时回滚内存值，避免界面与重载结果不一致。
+func (s *Server) SetFieldValue(number int, name string, value any) error {
+	db := s.DB(number)
+	if db == nil {
+		return fmt.Errorf("DB%d not found", number)
+	}
+	f, ok := db.Fields()[name]
+	if !ok {
+		return fmt.Errorf("字段不存在: %s", name)
+	}
+	old, _ := db.FieldValue(f)
+	if err := db.SetField(f, value); err != nil {
+		return err
+	}
+	// 整块原始字节是真相源，落库后重新加载/重启都能恢复该值。
+	if err := s.persistDBRaw(number); err != nil {
+		_ = db.SetField(f, old) // 回滚内存，保持与持久化状态一致
+		return err
+	}
+	// 兼容旧库（无 raw）时仍按字段 value 恢复，保持两者一致。
+	_ = s.store.UpdateFieldValue(number, name, value)
+	return nil
+}
+
+// SetBitValue 修改指定字节的某一位并持久化整块原始字节到 SQLite。
+// 位修改无论是否对应具名字段都会随整块 raw 落库，因此重新加载后均保持。
+func (s *Server) SetBitValue(number, offset, bit int, value bool) error {
+	db := s.DB(number)
+	if db == nil {
+		return fmt.Errorf("DB%d not found", number)
+	}
+	if err := db.SetBit(offset, bit, value); err != nil {
+		return err
+	}
+	if err := s.persistDBRaw(number); err != nil {
+		_ = db.SetBit(offset, bit, !value) // 回滚内存
+		return err
+	}
+	// 兼容旧库（无 raw）：若该位对应 bool/bit 字段，同步其 value。
+	for _, f := range db.Fields() {
+		t := strings.ToLower(f.Type)
+		if (t == "bool" || t == "bit") && f.Offset == offset && f.Bit == bit {
+			_ = s.store.UpdateFieldValue(number, f.Name, value)
+			break
+		}
+	}
 	return nil
 }
 

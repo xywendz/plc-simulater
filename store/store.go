@@ -13,11 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DBMeta 描述一个数据块（仅元数据）。
+// DBMeta 描述一个数据块的元数据与整块原始字节。
+// Raw 是数据块当前字节内容的真相源；字段定义（fields 表）只用于解释这些字节。
 type DBMeta struct {
 	Number int    `json:"number"`
 	Size   int    `json:"size"`
 	Name   string `json:"name"`
+	Raw    []byte `json:"-"`
 }
 
 // FieldMeta 描述数据块中的一个具名字段。
@@ -63,7 +65,8 @@ func (s *Store) init() error {
 	CREATE TABLE IF NOT EXISTS dbs (
 		number INTEGER PRIMARY KEY,
 		size   INTEGER NOT NULL,
-		name   TEXT    NOT NULL DEFAULT ''
+		name   TEXT    NOT NULL DEFAULT '',
+		raw    BLOB
 	);
 	CREATE TABLE IF NOT EXISTS fields (
 		db_number INTEGER NOT NULL,
@@ -84,21 +87,30 @@ func (s *Store) init() error {
 	// 兼容旧库：补齐新增列（已存在则忽略报错）
 	_, _ = s.db.Exec(`ALTER TABLE fields ADD COLUMN ord INTEGER NOT NULL DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE dbs ADD COLUMN name TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE dbs ADD COLUMN raw BLOB`)
 	return nil
 }
 
-// UpsertDB 写入或更新数据块元数据。
+// UpsertDB 写入或更新数据块元数据及整块原始字节。
 func (s *Store) UpsertDB(m DBMeta) error {
 	_, err := s.db.Exec(
-		`INSERT INTO dbs(number, size, name) VALUES(?, ?, ?)
-		 ON CONFLICT(number) DO UPDATE SET size=excluded.size, name=excluded.name`,
-		m.Number, m.Size, m.Name)
+		`INSERT INTO dbs(number, size, name, raw) VALUES(?, ?, ?, ?)
+		 ON CONFLICT(number) DO UPDATE SET
+			size=excluded.size, name=excluded.name,
+			raw=COALESCE(excluded.raw, dbs.raw)`,
+		m.Number, m.Size, m.Name, m.Raw)
+	return err
+}
+
+// UpdateDBRaw 只更新数据块的整块原始字节，不改动元数据。
+func (s *Store) UpdateDBRaw(number int, raw []byte) error {
+	_, err := s.db.Exec(`UPDATE dbs SET raw=? WHERE number=?`, raw, number)
 	return err
 }
 
 // GetDBs 返回所有数据块元数据，按编号排序。
 func (s *Store) GetDBs() ([]DBMeta, error) {
-	rows, err := s.db.Query(`SELECT number, size, name FROM dbs ORDER BY number`)
+	rows, err := s.db.Query(`SELECT number, size, name, raw FROM dbs ORDER BY number`)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +118,7 @@ func (s *Store) GetDBs() ([]DBMeta, error) {
 	var out []DBMeta
 	for rows.Next() {
 		var m DBMeta
-		if err := rows.Scan(&m.Number, &m.Size, &m.Name); err != nil {
+		if err := rows.Scan(&m.Number, &m.Size, &m.Name, &m.Raw); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -116,9 +128,9 @@ func (s *Store) GetDBs() ([]DBMeta, error) {
 
 // GetDB 返回单个数据块的元数据，不存在时返回 (nil, nil)。
 func (s *Store) GetDB(number int) (*DBMeta, error) {
-	row := s.db.QueryRow(`SELECT number, size, name FROM dbs WHERE number=?`, number)
+	row := s.db.QueryRow(`SELECT number, size, name, raw FROM dbs WHERE number=?`, number)
 	var m DBMeta
-	err := row.Scan(&m.Number, &m.Size, &m.Name)
+	err := row.Scan(&m.Number, &m.Size, &m.Name, &m.Raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -154,6 +166,29 @@ func (s *Store) UpsertField(f FieldMeta) error {
 			length=excluded.length, ord=excluded.ord, value=excluded.value`,
 		f.DBNumber, f.Name, f.Offset, strings.ToLower(f.Type), f.Bit, f.Length, f.Ord, string(v))
 	return err
+}
+
+// UpdateFieldValue 只更新字段的当前值，不改动字段定义（类型/偏移/顺序等）。
+// 用于运行时修改字段值后持久化，使重新加载时能恢复到最新值。
+func (s *Store) UpdateFieldValue(dbNumber int, name string, value any) error {
+	v, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Exec(
+		`UPDATE fields SET value=? WHERE db_number=? AND name=?`,
+		string(v), dbNumber, name)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("field %q not found in DB%d", name, dbNumber)
+	}
+	return nil
 }
 
 // GetFields 返回指定数据块的所有字段，按顺序（ord）、偏移、位号排序。

@@ -272,10 +272,72 @@ func TestImportChineseValueWithGappedOffsets(t *testing.T) {
 			if f.Value != "中文测试" {
 				t.Fatalf("导入值 = %q (类型 %T), 期望 中文测试", f.Value, f.Value)
 			}
+		}
+	}
+
+	// 导入的原始字节应已落库；重载后按字段定义重新解析仍得到正确中文值。
+	if err := dst.ReloadAll(); err != nil {
+		t.Fatalf("ReloadAll: %v", err)
+	}
+	view, _ = dst.GetDB(1)
+	for _, f := range view.Fields {
+		if f.Name == "ProductName" {
+			if f.Value != "中文测试" {
+				t.Fatalf("重载后值 = %q, 期望 中文测试", f.Value)
+			}
 			return
 		}
 	}
 	t.Fatal("导入后未找到 ProductName 字段")
+}
+
+func TestSetFieldPersistsAcrossReload(t *testing.T) {
+	b := newTestBridge(t)
+
+	if err := b.SetField(1, "Pressure", 99.5); err != nil {
+		t.Fatalf("SetField: %v", err)
+	}
+	if err := b.SetBit(1, 0, 0, false); err != nil {
+		t.Fatalf("SetBit: %v", err)
+	}
+	if err := b.SetField(1, "ProductName", "changed"); err != nil {
+		t.Fatalf("SetField string: %v", err)
+	}
+
+	view, _ := b.GetDB(1)
+	for _, f := range view.Fields {
+		switch f.Name {
+		case "Pressure":
+			if toFloat(f.Value) != 99.5 {
+				t.Fatalf("重载前 Pressure = %v, 期望 99.5", f.Value)
+			}
+		case "PumpOn":
+			if f.Value != false {
+				t.Fatalf("重载前 PumpOn = %v, 期望 false", f.Value)
+			}
+		}
+	}
+
+	if err := b.ReloadDB(1); err != nil {
+		t.Fatalf("ReloadDB: %v", err)
+	}
+	view, _ = b.GetDB(1)
+	for _, f := range view.Fields {
+		switch f.Name {
+		case "Pressure":
+			if toFloat(f.Value) != 99.5 {
+				t.Errorf("重载后 Pressure = %v, 期望 99.5", f.Value)
+			}
+		case "PumpOn":
+			if f.Value != false {
+				t.Errorf("重载后 PumpOn = %v, 期望 false", f.Value)
+			}
+		case "ProductName":
+			if f.Value != "changed" {
+				t.Errorf("重载后 ProductName = %v, 期望 changed", f.Value)
+			}
+		}
+	}
 }
 
 func TestExportAllSortedAndRejectsInvalid(t *testing.T) {

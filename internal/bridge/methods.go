@@ -87,26 +87,14 @@ func (b *Bridge) ReloadAll() error {
 	return b.srv.ReloadAll()
 }
 
-// SetBit 修改指定字节的某一位。
+// SetBit 修改指定字节的某一位（持久化到 SQLite）。
 func (b *Bridge) SetBit(number, offset, bit int, value bool) error {
-	db := b.srv.DB(number)
-	if db == nil {
-		return fmt.Errorf("DB%d 不存在", number)
-	}
-	return db.SetBit(offset, bit, value)
+	return b.srv.SetBitValue(number, offset, bit, value)
 }
 
-// SetField 修改具名字段的值。
+// SetField 修改具名字段的值（持久化到 SQLite）。
 func (b *Bridge) SetField(number int, name string, value any) error {
-	db := b.srv.DB(number)
-	if db == nil {
-		return fmt.Errorf("DB%d 不存在", number)
-	}
-	f, ok := db.Fields()[name]
-	if !ok {
-		return fmt.Errorf("字段不存在: %s", name)
-	}
-	return db.SetField(f, value)
+	return b.srv.SetFieldValue(number, name, value)
 }
 
 // UpsertField 新增或更新字段定义；偏移与位号由系统自动重算。

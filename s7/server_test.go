@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -663,4 +664,77 @@ func TestServerDBLengthsFromConfig(t *testing.T) {
 			t.Errorf("DB%d read @%d: ok=%v, want %v (data=% X)", b.db, b.size, ok, b.valid, data)
 		}
 	}
+}
+
+// TestServerS7WritePersistsAcrossReload 验证 S7 协议写入的原始字节会落库，
+// 重新加载与重建 Server 后，字段值和非字段区字节都能从原始字节恢复。
+func TestServerS7WritePersistsAcrossReload(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "s7-persist.db")
+	cfg := testConfig()
+	cfg.DBPath = dbPath
+
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	s.logger = log.New(io.Discard, "", 0)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go s.Serve(ln)
+	defer ln.Close()
+
+	c := dial(t, ln.Addr().String())
+	defer c.close()
+
+	// 写 REAL 到具名字段 TankLevel(offset 0)，以及非字段区字节(offset 100)。
+	val := make([]byte, 4)
+	binary.BigEndian.PutUint32(val, math.Float32bits(77.25))
+	rcs := c.writeVar(
+		[]*item{
+			{Area: AreaDB, DBNum: 1, Offset: 0, TS: TSReal, Length: 1},
+			{Area: AreaDB, DBNum: 1, Offset: 100, TS: TSByte, Length: 2},
+		},
+		[][]byte{
+			append([]byte{TSResReal}, val...),
+			{TSResByte, 0xAB, 0xCD},
+		})
+	if len(rcs) != 2 || rcs[0] != ResOK || rcs[1] != ResOK {
+		t.Fatalf("write rc = % X, want FF FF", rcs)
+	}
+
+	check := func(tag string) {
+		t.Helper()
+		db := s.DB(1)
+		f, ok := db.Fields()["TankLevel"]
+		if !ok {
+			t.Fatalf("%s: TankLevel 字段不存在", tag)
+		}
+		v, _ := db.FieldValue(f)
+		if toF, ok := v.(float32); !ok || toF != 77.25 {
+			t.Errorf("%s: TankLevel = %v, want 77.25", tag, v)
+		}
+		raw, _ := db.Read(100, 2)
+		if !bytes.Equal(raw, []byte{0xAB, 0xCD}) {
+			t.Errorf("%s: 非字段区字节 = % X, want AB CD", tag, raw)
+		}
+	}
+	check("写入后")
+
+	// 重新加载：应从落库的整块 raw 恢复。
+	if err := s.ReloadDB(1); err != nil {
+		t.Fatalf("ReloadDB: %v", err)
+	}
+	check("重新加载后")
+
+	// 关闭后基于同一数据库重建 Server：重启也应保留。
+	s.Close()
+	s2, err := New(cfg)
+	if err != nil {
+		t.Fatalf("重建 New: %v", err)
+	}
+	defer s2.Close()
+	s = s2
+	check("重建 Server 后")
 }

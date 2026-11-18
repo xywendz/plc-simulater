@@ -275,6 +275,9 @@ func (b *Bridge) ImportDB(e ExportedDB) error {
 				return err
 			}
 		}
+		if err := b.srv.PersistDBRaw(e.Number); err != nil {
+			return fmt.Errorf("DB%d 原始字节持久化失败: %w", e.Number, err)
+		}
 		return nil
 	}
 
@@ -298,6 +301,9 @@ func (b *Bridge) ImportDB(e ExportedDB) error {
 			if err := db.Write(0, raw); err != nil {
 				return err
 			}
+		}
+		if err := b.srv.PersistDBRaw(e.Number); err != nil {
+			return fmt.Errorf("DB%d 原始字节持久化失败: %w", e.Number, err)
 		}
 	}
 	return nil

@@ -243,6 +243,7 @@ func (s *Server) handleWrite(h PDUHeader, params, data []byte, remote string) []
 		return nil
 	}
 	rcs := make([]byte, 0, count)
+	written := make(map[int]struct{}) // 成功写入的 DB 号，去重后统一持久化原始字节
 	off := 0
 	for i := 0; i < count; i++ {
 		it, err := parseItem(params[2+i*12:])
@@ -263,8 +264,15 @@ func (s *Server) handleWrite(h PDUHeader, params, data []byte, remote string) []
 			rcs = append(rcs, mapWriteError(err))
 			continue
 		}
+		written[it.DBNum] = struct{}{}
 		s.logger.Printf("write %s from %s", it, remote)
 		rcs = append(rcs, ResOK)
+	}
+	// S7 写入的是原始字节，将其落库，使重新加载/重启后按字段定义解析仍得到相同值。
+	for number := range written {
+		if err := s.persistDBRaw(number); err != nil {
+			s.logger.Printf("persist DB%d raw after write failed: %v", number, err)
+		}
 	}
 	return BuildFrame(BuildAckData(h.Ref, []byte{FuncWrite, byte(count)}, rcs))
 }

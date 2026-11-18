@@ -336,11 +336,11 @@ func (s *Server) handleSetBit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := db.SetBit(req.Offset, req.Bit, req.Value); err != nil {
+	if err := s.SetBitValue(num, req.Offset, req.Bit, req.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.logger.Printf("HTTP 修改 DB%d 位 @%d.%d = %v", db.Number, req.Offset, req.Bit, req.Value)
+	s.logger.Printf("HTTP 修改 DB%d 位 @%d.%d = %v", num, req.Offset, req.Bit, req.Value)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -351,11 +351,6 @@ func (s *Server) handleSetField(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid db number", http.StatusBadRequest)
 		return
 	}
-	db := s.DB(num)
-	if db == nil {
-		http.Error(w, "db not found", http.StatusNotFound)
-		return
-	}
 	var req struct {
 		Name  string `json:"name"`
 		Value any    `json:"value"`
@@ -364,17 +359,20 @@ func (s *Server) handleSetField(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	fields := db.Fields()
-	f, ok := fields[req.Name]
-	if !ok {
+	db := s.DB(num)
+	if db == nil {
+		http.Error(w, "db not found", http.StatusNotFound)
+		return
+	}
+	if _, ok := db.Fields()[req.Name]; !ok {
 		http.Error(w, "field not found: "+req.Name, http.StatusNotFound)
 		return
 	}
-	if err := db.SetField(f, req.Value); err != nil {
+	if err := s.SetFieldValue(num, req.Name, req.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.logger.Printf("HTTP 修改 DB%d 字段 %s = %v", db.Number, req.Name, req.Value)
+	s.logger.Printf("HTTP 修改 DB%d 字段 %s = %v", num, req.Name, req.Value)
 	writeJSON(w, map[string]any{"ok": true})
 }
 
