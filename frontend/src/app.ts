@@ -138,7 +138,7 @@ function renderDetail(db: DBView): void {
         <td class="mono">${f.offset}</td>
         <td class="mono">${isBit ? f.bit : ""}</td>
         <td class="mono">${f.length || ""}</td>
-        <td class="mono val-cell" title="双击修改当前值"
+        <td class="mono val-cell" title="${isBit ? "双击输入 true 或 false" : "双击修改当前值"}"
           data-db="${db.number}" data-name="${esc(f.name)}" data-type="${f.type}"
           data-offset="${f.offset}" data-bit="${f.bit}" data-raw="${esc(raw)}">${raw}</td>
         <td><div class="ops">
@@ -347,9 +347,9 @@ function beginValueEdit(td: HTMLElement): void {
   const original = td.textContent ?? "";
 
   const input = document.createElement("input");
-  input.type = isBit ? "checkbox" : "text";
-  if (isBit) input.checked = raw === "true";
-  else input.value = raw;
+  input.type = "text";
+  input.value = raw;
+  if (isBit) input.title = "输入 true 或 false";
 
   let done = false;
   const finish = async (commit: boolean): Promise<void> => {
@@ -359,13 +359,20 @@ function beginValueEdit(td: HTMLElement): void {
     input.onchange = null;
     input.onkeydown = null;
 
+    const text = input.value.trim();
     let display = original;
     let value: any;
     if (isBit) {
-      value = input.checked;
+      // 布尔值用文本输入：只接受 true / false（大小写不敏感）。
+      const v = text.toLowerCase();
+      if (v !== "true" && v !== "false") {
+        toast("布尔值请输入 true 或 false", false);
+        td.textContent = original;
+        return;
+      }
+      value = v === "true";
       display = String(value);
     } else {
-      const text = input.value.trim();
       if (text === "" && type !== "string") {
         td.textContent = original;
         return;
@@ -393,7 +400,6 @@ function beginValueEdit(td: HTMLElement): void {
   };
 
   input.onblur = () => void finish(true);
-  input.onchange = () => void finish(true);
   input.onkeydown = (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -407,7 +413,7 @@ function beginValueEdit(td: HTMLElement): void {
   td.textContent = "";
   td.appendChild(input);
   input.focus();
-  if (!isBit) input.select();
+  input.select();
 }
 
 async function moveField(name: string, dir: number): Promise<void> {
